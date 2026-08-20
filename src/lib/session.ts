@@ -11,8 +11,13 @@ const SESSION_PATH = resolve(process.cwd(), "sessions/indeed.session");
 // again) until the session actually expires.
 export async function saveSession(context: BrowserContext): Promise<void> {
   const state = await context.storageState();
-  const encrypted = encrypt(JSON.stringify(state));
+  saveSessionState(state);
+}
 
+// Lower-level version — used when the state comes from somewhere other than
+// a live Playwright context (e.g. imported from a browser cookie export).
+export function saveSessionState(state: unknown): void {
+  const encrypted = encrypt(JSON.stringify(state));
   mkdirSync(dirname(SESSION_PATH), { recursive: true });
   writeFileSync(SESSION_PATH, encrypted, "utf-8");
 }

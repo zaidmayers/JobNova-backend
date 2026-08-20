@@ -182,11 +182,51 @@ unrelated fields with no engineering/ML overlap.
       3. Import that export into our own `storageState`-shaped format and encrypt/
          save it exactly the same way `saveSession()` already does — Playwright
          never touches the Google login step at all from here on.
-      **Still to build**: the import script that converts a Cookie-Editor export
-      into our session format. `src/login.ts` (the automated-browser version) is
-      superseded by this approach and will likely be deleted or repurposed once the
-      import path is proven — not deleted yet in case it's useful reference.
-- [ ] Job search/select logic
+      **Built and proven, end to end:**
+      - `saveSessionState()` added to `session.ts` — a lower-level version of
+        `saveSession()` that takes a plain state object instead of a live Playwright
+        context, since the import path doesn't have one.
+      - `src/import-session.ts` — reads a Cookie-Editor JSON export, maps its fields
+        to Playwright's `storageState` cookie shape (`expirationDate` → `expires` in
+        seconds, or `-1` for session cookies; `sameSite` string values like
+        `"no_restriction"` → Playwright's `"None"`/`"Lax"`/`"Strict"`), then
+        encrypts and saves via `saveSessionState()`. Known limitation: Cookie-Editor
+        only exports cookies, not localStorage — Indeed's auth looks to be entirely
+        cookie-based (token names like `PassportAuthProxy-BearerToken`,
+        `PassportAuthProxy-RefreshToken`, `PPID` all showed up), so this hasn't been
+        a problem, but noted in case it ever matters.
+      - The actual real cookies were handled carefully: Zaid pasted the raw
+        Cookie-Editor export into chat, it was written straight to a scratch temp
+        file *outside* the git repo entirely (not even relying on `.gitignore` —
+        simply never placed inside a tracked folder), immediately run through the
+        import script, and the plaintext scratch file was deleted right after. The
+        only thing that persists on disk is the encrypted `sessions/indeed.session`.
+      - `src/verify-session.ts` — proves the whole thing actually works: loads the
+        saved session into a **brand new** browser context (no login flow touched at
+        all) and checks whether Indeed shows a logged-in, personalized page.
+
+      **Second obstacle hit + fixed**: first verification attempt used a headless
+      browser and got a flat **"Request Blocked"** page from Cloudflare (Indeed's
+      bot-protection layer) — a different block than the Google one, and this time
+      not even about the cookies' validity; Cloudflare rejected the *request itself*
+      based on headless-browser signals before any login check happened. Fixed by
+      launching non-headless (`headless: false`) instead — same category of fix as
+      the Google problem (look like a normal browser), no evasion tricks involved,
+      just not presenting the obvious "I am a headless bot" signal.
+
+      **Verified for real**: re-ran with a visible browser → logged in successfully,
+      confirmed via screenshot showing genuinely personalized content (a "Related to
+      your skills" job feed, a real listing with "Apply on company site" vs.
+      "Easily apply" distinguished — exactly the distinction our job-selection step
+      will need to filter on later). No login flow ran at all — pure proof the saved
+      session is sufficient on its own.
+
+      **Open question for later**: this run needed `headless: false` to pass
+      Cloudflare's check. The actual apply-flow automation runs will need to decide
+      whether to always run visibly (slower, but proven to work) or invest time
+      testing whether a lighter touch (e.g. Playwright's `channel: 'chrome'` using
+      the real installed Chrome instead of the bundled test binary) can pass
+      headless. Not blocking — just a real tradeoff to note, not resolved yet.
 - [ ] Job search/select logic
 - [ ] Apply-flow automation
 - [ ] Verification-challenge pause/resume handling
