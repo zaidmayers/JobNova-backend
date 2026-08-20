@@ -135,7 +135,58 @@ unrelated fields with no engineering/ML overlap.
       `resumePath`) — only exists as a chat attachment so far, not yet placed in
       the folder. Not blocking anything yet; needed once the apply-flow step
       actually uploads/attaches it.
-- [ ] Login flow + session save/restore
+- [~] **Login flow + session save/restore — in progress, real obstacle hit and
+      being worked around.**
+      Built first: `src/lib/crypto.ts` (AES-256-GCM encrypt/decrypt — authenticated
+      encryption, so a tampered or wrong-key file fails loudly instead of silently
+      returning garbage), `src/lib/session.ts` (wraps Playwright's
+      `context.storageState()` — the actual "wristband" — through that encryption,
+      reads/writes `sessions/indeed.session`, gitignored), `.env`/`.env.example` for
+      the encryption key (`SESSION_ENCRYPTION_KEY`, 32-byte random hex, generated via
+      Node's own `crypto.randomBytes` — `.env` itself gitignored, confirmed via
+      `git check-ignore` before writing anything real into it).
+      `src/login.ts` — first attempt: launch a *visible* (non-headless) Playwright
+      browser, human manually clicks through "Continue with Google," script watches
+      navigation events (waits for the URL to hit `accounts.google.com`, then waits
+      for it to return to indeed.com not on a login path) rather than requiring a
+      relayed keypress, which isn't reliably possible in this setup anyway.
+
+      **Bug found + fixed (before the bigger obstacle)**: the original version only
+      called `browser.close()` on the success path — a timeout/error left an orphaned
+      browser window running. Fixed with try/finally so it always closes.
+
+      **First real run**: timed out after 5 minutes — turned out Zaid just hadn't
+      looked at the screen yet (window opened, sat on indeed.com, nobody clicked
+      anything). Not a technical failure, just retried.
+
+      **Second run — the actual obstacle**: Google outright refused the sign-in —
+      "Couldn't sign you in. This browser or app may not be secure," specifically
+      naming the browser as "Google Chrome for Testing" (Playwright's bundled
+      Chromium identifies itself as this). Google detects automated/CDP-controlled
+      browser sessions and blocks OAuth sign-in through them *regardless of whether
+      a real human is doing the clicking* — the block is on the browser itself, not
+      the behavior inside it.
+
+      **This is not something to work around by evasion** (spoofing the browser
+      identity, stripping automation flags, etc.) — that would be exactly the kind
+      of security-mechanism bypass the brief says not to do, just aimed at Google
+      instead of Indeed.
+
+      **The actual fix — flip where the login happens:**
+      1. Zaid logs into Indeed via Google in his own **normal, everyday Chrome** —
+         zero automation involved, so Google has no reason to block it.
+      2. Export the resulting session cookies from that real browser using a
+         standard cookie-export extension (Cookie-Editor) — an ordinary, sanctioned
+         mechanism (same category of access as opening DevTools), not a bypass of
+         anything.
+      3. Import that export into our own `storageState`-shaped format and encrypt/
+         save it exactly the same way `saveSession()` already does — Playwright
+         never touches the Google login step at all from here on.
+      **Still to build**: the import script that converts a Cookie-Editor export
+      into our session format. `src/login.ts` (the automated-browser version) is
+      superseded by this approach and will likely be deleted or repurposed once the
+      import path is proven — not deleted yet in case it's useful reference.
+- [ ] Job search/select logic
 - [ ] Job search/select logic
 - [ ] Apply-flow automation
 - [ ] Verification-challenge pause/resume handling
