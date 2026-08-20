@@ -91,7 +91,50 @@ unrelated fields with no engineering/ML overlap.
       logic once we start building the actual login flow): confirmed Playwright can
       actually launch/drive a browser and `better-sqlite3` can read/write, before
       building anything real on top.
-- [ ] `CandidateProfile` schema (real resume/contact/experience/education/preferences)
+- [x] **`CandidateProfile` schema + real profile data.**
+      `src/types/profile.ts` — the shape (fullName, email, phone, location, resume
+      path, education[], experience[], skills[], jobPreferences). Safe to commit —
+      structure only, no real data.
+      `profile.example.json` — fake filled-in example showing the shape, committed.
+      `profile.json` — the **real** data, gitignored, never committed. Contains full
+      real education/experience history from the resume, and answers to the
+      questions only Zaid could answer (not guessable from a resume):
+        - Target titles: Machine Learning Engineer, AI Engineer, GenAI Engineer,
+          Computer Vision Engineer, Software Engineer, Full-Stack Engineer, Backend
+          Engineer
+        - Locations: "Anywhere in the US" (confirmed no conflict with the brief —
+          it only requires "reasonably relevant," not geographically restricted)
+        - Min salary: $70,000/yr or $27/hr (stored both — some listings ask hourly,
+          not just annual; schema field renamed from a single `amount`/`period` pair
+          to `{ annual, hourly }` to hold both accurately rather than picking one)
+        - Work authorization: **requires sponsorship** — a real, load-bearing fact.
+          Matters twice: (1) must be answered truthfully on any application that
+          asks it, (2) worth factoring into job selection later, since some listings
+          explicitly won't consider candidates needing sponsorship.
+        - Availability: immediate
+      `src/lib/profile.ts` — loader with a clear error if `profile.json` is missing
+      (expected for anyone else who clones this repo — they'd only have
+      `profile.example.json`), plus a minimal required-field check (not a full
+      schema validator — out of scope for "small reusable module," just enough to
+      fail loudly and early rather than deep into a browser run).
+      Experience entries deliberately have **optional** start/end dates — the
+      resume's project entries (Altabeeb, LISTO, etc.) don't list precise dates
+      unlike the formal Research Assistant role, and dates weren't invented to fill
+      the gap.
+      Bug found + fixed: `tsc --noEmit` failed with "Cannot find name 'console'" /
+      "'node:fs'" even though `@types/node` was installed — tsconfig needed an
+      explicit `"types": ["node"]`; wasn't being auto-discovered otherwise. Same
+      "bleeding-edge toolchain" pattern we hit on the frontend (Next.js 16, Tailwind
+      v4) — new package versions in this environment need occasional adjustments
+      that older tutorials/muscle memory wouldn't expect.
+      Verified: rewrote `src/index.ts` (was just the scaffold smoke test) to load
+      the real profile and print a summary — ran it, confirmed every field reads
+      back correctly. Then confirmed `tsc --noEmit` clean too.
+      **Still needed**: the actual resume PDF file on disk at
+      `backend/Zaid_Mayers_Resume.pdf` (referenced by `profile.json`'s
+      `resumePath`) — only exists as a chat attachment so far, not yet placed in
+      the folder. Not blocking anything yet; needed once the apply-flow step
+      actually uploads/attaches it.
 - [ ] Login flow + session save/restore
 - [ ] Job search/select logic
 - [ ] Apply-flow automation

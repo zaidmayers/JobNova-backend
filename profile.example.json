@@ -1,0 +1,35 @@
+{
+  "fullName": "Jane Example",
+  "email": "jane.example@gmail.com",
+  "phone": "+1 555 123 4567",
+  "location": "Austin, TX",
+  "resumePath": "./resume.pdf",
+  "education": [
+    {
+      "degree": "M.S. in Example Engineering",
+      "institution": "Example University",
+      "location": "Austin, TX"
+    }
+  ],
+  "experience": [
+    {
+      "title": "Example Engineer",
+      "company": "Example Corp",
+      "startDate": "2023-01",
+      "endDate": "Present",
+      "description": "Brief description of what you did in this role."
+    }
+  ],
+  "skills": ["Python", "Example Skill"],
+  "jobPreferences": {
+    "titles": ["Example Engineer", "Senior Example Engineer"],
+    "locations": ["Anywhere in the US"],
+    "remoteOk": true,
+    "minSalary": { "annual": 70000, "hourly": 27 },
+    "workAuthorization": {
+      "authorizedWithoutSponsorship": true,
+      "requiresSponsorship": false
+    },
+    "availability": "immediate"
+  }
+}
