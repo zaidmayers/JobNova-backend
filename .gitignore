@@ -1,0 +1,28 @@
+# Dependencies / build output
+node_modules/
+dist/
+
+# Real secrets — actual values live only in .env, never committed.
+# .env.example (committed) shows what variables exist, with fake values.
+.env
+.env.local
+
+# Real candidate profile data (resume text, contact info) — see profile.example.json
+profile.json
+
+# The actual database file — contains real application history once this
+# runs for real. Only schema/migration files are committed, never the data.
+data/*.db
+data/*.db-journal
+data/*.db-wal
+
+# Saved login sessions — this is exactly the sensitive material the whole
+# "session management" part of this project is about protecting. Never
+# committed, even encrypted.
+sessions/
+*.session
+*.session.json
+
+# OS/editor cruft
+.DS_Store
+*.log

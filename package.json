@@ -1,0 +1,26 @@
+{
+  "name": "jobnova-backend",
+  "version": "1.0.0",
+  "description": "Minimal Indeed auto-apply workflow module — Jobnova take-home (backend half).",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zaidmayers/JobNova-backend.git"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.2.0",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "dotenv": "^17.4.2",
+    "playwright": "^1.62.1"
+  }
+}
