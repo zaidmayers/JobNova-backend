@@ -367,7 +367,91 @@ unrelated fields with no engineering/ML overlap.
       ($80K-$120K/yr) jobs seen firsthand in an earlier screenshot, plus a listing
       with no salary shown that correctly wasn't excluded. **Job search/select
       logic is done.**
-- [ ] Apply-flow automation
+- [~] **Apply-flow automation — in progress. Real flow mapped out
+      (look-only, nothing submitted yet), LLM-drafted screening answers
+      built and verified. Actual form-filling not wired up yet.**
+
+      Picked the first real target: "Machine Learning Engineer" @ KSB SE & Co.
+      KGaA ($80K-$120K/yr) — the cleanest title match of the 5 candidates found,
+      genuinely strong fit (job explicitly wants Python/PyTorch/scikit-learn,
+      scientific computing, neural networks — all real skills on the resume).
+
+      **Explored the real flow first, deliberately not submitting anything**
+      (`src/explore-apply.ts` — walks the wizard screen by screen, screenshots
+      each one, clicks whatever the "keep going" button is, and hard-stops the
+      moment it sees a button whose label contains "submit" — never clicks that
+      one). Real flow shape discovered: Apply with Indeed → resume-selection
+      (already correctly pre-selected as the real uploaded PDF) →
+      structured-data-intro → structured-data-review (Indeed auto-parses the
+      resume into Experience/Education, editable) → questions (screening
+      questions, employer-specific) → ... (submit step not yet reached).
+
+      **KSB's flow hit a real, persistent error on Indeed's own side** — a
+      generic "Something went wrong, our systems are having trouble" that
+      didn't clear even after "Try again" (second attempt: "still having
+      trouble... you can save the job for later," Try again option gone
+      entirely). Not a bot block, not us — a real backend hiccup on Indeed's
+      end, confirmed by switching to a different job and getting normal
+      behavior instead. This is honest `failed`-status material: added
+      "Try again" handling to the explorer (Indeed itself offers this button;
+      using it once or twice is reasonable, not evasion) but didn't force past
+      the second failure — moved to a different job instead, same principle as
+      not fighting Cloudflare.
+
+      **Switched to "AI Solutions Engineer" @ Trece, Inc** ($75,000/yr) — flowed
+      past resume-selection cleanly straight into a **screening-questions**
+      step with 10 fields: 2 structured (work-authorization Yes/No, relocation
+      Yes/No/Doesn't-apply), 1 short factual (sponsorship — Indeed had already
+      pre-filled "Python" into an unrelated field on its own, interesting
+      precedent), and **7 open-ended free-text questions** ("Briefly describe
+      an AI project you've built," "What AI platforms have you used?", etc.) —
+      genuinely employer-specific, not answerable from a simple field lookup.
+
+      **Design decision, discussed directly with Zaid**: roughly half of
+      Easy-Apply jobs carry custom screening questions like this — pausing on
+      every one would gut most of the actual automation value the brief asks
+      for. But auto-generating unreviewed prose about someone's real
+      experience, submitted to a real employer under their real name, is a
+      genuine integrity risk if it's wrong — not just an engineering
+      annoyance. Landed on: **factual Yes/No/dropdown questions get filled
+      directly from profile data (no LLM, no risk); open-ended narrative
+      questions get an LLM-drafted answer, strictly grounded in the real
+      profile, typed into the field — but the flow pauses before final
+      submission so Zaid reviews/edits in the actual browser before anything
+      goes out.** Same "pause and hand back to the human for the part that
+      needs judgment" principle as the CAPTCHA handling, just triggered by a
+      different kind of risk.
+
+      **LLM choice: Kimi (Moonshot AI)**, Zaid's own key/preference — not
+      Claude, which is what was originally suggested; confirmed directly with
+      him rather than assuming. `src/lib/kimi.ts` — plain `fetch` client
+      (OpenAI-compatible chat completions format), no SDK dependency needed
+      for one endpoint.
+      Two bugs hit getting it working, both fixed by checking current docs
+      instead of guessing twice: wrong model name (`kimi-k2-0711-preview`
+      doesn't exist — the docs had moved to `platform.kimi.ai` and the current
+      flagship model is `kimi-k3`); then `kimi-k3` rejected any `temperature`
+      other than `1`, so the param was dropped entirely rather than hardcoded
+      to a value that happened to work.
+      `src/lib/screeningAnswers.ts` — `draftScreeningAnswer(question, profile)`.
+      The system prompt is the actual safety mechanism here: explicitly
+      instructed to only state things directly supported by the profile, and
+      to honestly say "I haven't worked with X" rather than invent experience
+      to sound more qualified.
+      **Verified against 3 real questions from the actual Trece Inc form**
+      before wiring anything into the browser (`src/test-screening.ts`,
+      offline from Playwright entirely). Results were genuinely well-grounded:
+      correctly listed real tools/frameworks with correct specifics (e.g., the
+      exact mAP@50 numbers from the real drone-detection research), and —
+      the important case — **correctly admitted no experience with Zapier/Make**
+      rather than fabricating familiarity. That honest-refusal behavior is the
+      one that actually matters most; a model that always sounds confident
+      would be more dangerous here than one that sometimes says "I haven't."
+
+      **Not done yet**: wiring the structured-field-fill + LLM-draft-fill
+      logic into the actual browser automation (`explore-apply.ts` only reads
+      button labels, doesn't fill anything), and the pause-before-submit
+      checkpoint itself.
 - [x] Verification-challenge pause/resume handling — the detect-and-pause mechanism
       (`waitIfChallenged`) is built and **proven live** against a real Cloudflare
       challenge (see above). What's not done yet: wiring a detected challenge into
