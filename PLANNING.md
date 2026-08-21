@@ -227,8 +227,8 @@ unrelated fields with no engineering/ML overlap.
       testing whether a lighter touch (e.g. Playwright's `channel: 'chrome'` using
       the real installed Chrome instead of the bundled test binary) can pass
       headless. Not blocking — just a real tradeoff to note, not resolved yet.
-- [~] **Job search/select logic — built, real problems hit and fixed, one
-      still pending resolution.**
+- [x] **Job search/select logic — built, two real bugs hit and fixed, verified
+      working end to end against live data.**
       `src/types/job.ts` (backend's own `JobListing` — distinct from the frontend's
       mock `JobDetail`, this is real scraped data), `src/lib/salary.ts`
       (`meetsMinSalary` — compares a listing's salary text against the profile's
@@ -359,6 +359,14 @@ unrelated fields with no engineering/ML overlap.
       correctly excluded. Also dropped the earlier guessed `data-testid` selectors
       for company/location entirely — same root-cause bug (wrong scope), replaced
       with the text-parsing approach instead of re-guessing new selectors.
+
+      **Confirmed working end to end**: re-ran the real (single, paced) search —
+      no Cloudflare issue this time — and got 5 real, correctly-filtered suitable
+      jobs, including the exact same "Manufacturing Innovation Advanced Technology
+      Engineer" ($55-$63/hr) and "Machine Learning Engineer" @ KSB SE & Co. KGaA
+      ($80K-$120K/yr) jobs seen firsthand in an earlier screenshot, plus a listing
+      with no salary shown that correctly wasn't excluded. **Job search/select
+      logic is done.**
 - [ ] Apply-flow automation
 - [x] Verification-challenge pause/resume handling — the detect-and-pause mechanism
       (`waitIfChallenged`) is built and **proven live** against a real Cloudflare
