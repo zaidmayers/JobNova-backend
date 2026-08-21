@@ -331,7 +331,40 @@ unrelated fields with no engineering/ML overlap.
       at least not quickly. The system's correct behavior in that case — proven
       live here — is to stop completely and surface it as `manual_action_required`,
       not to try harder to get through.
+
+      **Zaid asked the right question**: why was the search doing so much (looping
+      up to 7 job-title searches hunting for exactly 5 results) when the brief only
+      ever asked for "a small number of suitable jobs"? Correct catch — that scope
+      was self-imposed, not required, and it's exactly what caused the repeated
+      rapid requests that tripped Cloudflare in the first place. The `maxSearches=1`
+      change above isn't just a safety patch, it's the properly-scoped version of
+      this step.
+
+      **Second real bug found + fixed, after re-running the (now single, safe)
+      search and getting a suspicious "Found 0 suitable job(s)"** despite a
+      screenshot clearly showing several "Easily apply" jobs well above the salary
+      floor on that exact page. Didn't accept the 0 at face value — wrote a quick
+      throwaway diagnostic (`debug-search.ts`, deleted after use) to dump the raw
+      text Playwright was actually reading. Root cause: `[data-jk]` is NOT the
+      full card, it's a narrow inner element (just the title link) — its own
+      `innerText()` is only the job title, nothing else, which is why
+      `easyApply`/salary detection always came back empty. Confirmed the fix
+      (`ancestor::li[1]` is the real card boundary) by dumping both levels side by
+      side for 4 real cards, then verified the parsing logic
+      (`parseCompanyAndLocation` — company is reliably the line immediately before
+      a "City, ST"-shaped location line, regardless of how many variable badge
+      lines like "New"/"Often replies in 1 day" come before them) against all 4
+      real captured examples **offline, before spending another live search** —
+      3 of 4 correctly identified as meeting the salary floor, the $19-$25/hr one
+      correctly excluded. Also dropped the earlier guessed `data-testid` selectors
+      for company/location entirely — same root-cause bug (wrong scope), replaced
+      with the text-parsing approach instead of re-guessing new selectors.
 - [ ] Apply-flow automation
-- [ ] Verification-challenge pause/resume handling
+- [x] Verification-challenge pause/resume handling — the detect-and-pause mechanism
+      (`waitIfChallenged`) is built and **proven live** against a real Cloudflare
+      challenge (see above). What's not done yet: wiring a detected challenge into
+      an actual `manual_action_required` database row — that's blocked on the
+      "Application status tracking" milestone below, which hasn't been built. The
+      mechanism itself works; persisting that status doesn't exist yet.
 - [ ] Application status tracking (SQLite)
 - [ ] README (architecture, session handling, failure handling, multi-user extension)

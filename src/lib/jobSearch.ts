@@ -13,20 +13,32 @@ function pace(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Short timeout for "best effort" per-card lookups — bug found + fixed:
-// Playwright's DEFAULT action timeout is 30s. With 3 such lookups per card
-// wrapped in .catch() and ~15-20 cards per page, a wrong/missing selector
-// meant 3 x 30s x ~15-20 cards = 20+ minutes stuck on a SINGLE search page,
-// not actually hung, just silently eating timeouts one at a time. See
-// PLANNING.md.
-const LOOKUP_TIMEOUT = 1500;
-
-// Salary is pulled from the card's already-fetched text via regex instead
-// of a separate selector lookup — zero extra round-trips, and it's visibly
-// present in the card text anyway (confirmed against real screenshots).
+// Salary is pulled from the card's text via regex — no separate lookup,
+// visibly present in the card text (confirmed against real cards).
 function extractSalaryText(cardText: string): string | null {
   const match = cardText.match(/\$[\d,.]+(\s*-\s*\$[\d,.]+)?\s*an?\s*(hour|year)/i);
   return match ? match[0] : null;
+}
+
+// Bug found + fixed (see PLANNING.md): earlier version guessed at
+// data-testid selectors for company/location, scoped to the WRONG element
+// (see below) — always came back empty. Real card text (confirmed against
+// 4 live examples) always has company immediately followed by a
+// "City, ST"-shaped location line, regardless of how many badge lines
+// ("Easily apply", "New", "Often replies in 1 day", etc.) come before them.
+// That pattern is more reliable than a guessed selector.
+function parseCompanyAndLocation(text: string): { company: string; location: string } {
+  const lines = text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const locationIndex = lines.findIndex(
+    (line) => /,\s*[A-Z]{2}\b/.test(line) || /\bRemote\b/i.test(line)
+  );
+  if (locationIndex > 0) {
+    return { location: lines[locationIndex], company: lines[locationIndex - 1] };
+  }
+  return { company: "", location: "" };
 }
 
 async function searchJobsForTitle(page: Page, title: string): Promise<JobListing[]> {
@@ -39,40 +51,37 @@ async function searchJobsForTitle(page: Page, title: string): Promise<JobListing
 
   await waitIfChallenged(page);
 
-  const cards = page.locator("[data-jk]");
-  const count = await cards.count();
+  // Bug found + fixed (see PLANNING.md): [data-jk] is NOT the full card —
+  // it's a narrow inner element (just the title link). Its own innerText is
+  // only the title, nothing else, which is why easyApply/salary detection
+  // always came back empty/false before. The actual card — badge, company,
+  // location, salary — is the nearest enclosing <li>, confirmed by dumping
+  // real innerText from both levels side by side.
+  const jobLinks = page.locator("[data-jk]");
+  const count = await jobLinks.count();
   const results: JobListing[] = [];
   const seenOnPage = new Set<string>();
 
   for (let i = 0; i < count; i++) {
-    const card = cards.nth(i);
-    const jobKey = await card.getAttribute("data-jk").catch(() => null);
+    const link = jobLinks.nth(i);
+    const jobKey = await link.getAttribute("data-jk").catch(() => null);
     if (!jobKey || seenOnPage.has(jobKey)) continue;
     seenOnPage.add(jobKey);
 
+    const card = link.locator("xpath=ancestor::li[1]");
     const text = await card.innerText().catch(() => "");
-    if (!text.trim()) continue; // some [data-jk] matches are non-card elements
+    if (!text.trim()) continue; // some [data-jk] matches have no <li> ancestor
 
     const easyApply = /easily apply/i.test(text);
     const titleLine = text.split("\n").find((line) => line.trim().length > 0) ?? "";
     const salaryText = extractSalaryText(text);
-
-    const company = await card
-      .locator('[data-testid="company-name"]')
-      .first()
-      .innerText({ timeout: LOOKUP_TIMEOUT })
-      .catch(() => "");
-    const location = await card
-      .locator('[data-testid="text-location"]')
-      .first()
-      .innerText({ timeout: LOOKUP_TIMEOUT })
-      .catch(() => "");
+    const { company, location } = parseCompanyAndLocation(text);
 
     results.push({
       jobKey,
       title: titleLine.trim(),
-      company: company.trim(),
-      location: location.trim(),
+      company,
+      location,
       url: `https://www.indeed.com/viewjob?jk=${jobKey}`,
       easyApply,
       salaryText,
