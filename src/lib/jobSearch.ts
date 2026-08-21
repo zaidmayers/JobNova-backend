@@ -86,15 +86,27 @@ async function searchJobsForTitle(page: Page, title: string): Promise<JobListing
 // Selects a small number of suitable jobs (per the brief) across the
 // candidate's target titles. Filters: Easily-apply only (see PLANNING.md —
 // company-site applications are out of scope), and salary floor.
+//
+// maxSearches caps how many DIFFERENT title searches happen in one call,
+// independent of targetCount — default 1. This is a direct response to a
+// real finding (see PLANNING.md): a single search page is enough to trigger
+// Cloudflare's escalated bot detection, one that even genuine human
+// interaction couldn't clear afterward. A single search per run is
+// deliberately conservative; run again later (separately, not looped
+// in-process) for more candidates rather than chaining searches back to
+// back.
 export async function searchJobs(
   page: Page,
   profile: CandidateProfile,
-  targetCount: number
+  targetCount: number,
+  maxSearches = 1
 ): Promise<JobListing[]> {
   const seen = new Set<string>();
   const selected: JobListing[] = [];
 
-  for (const [index, title] of profile.jobPreferences.titles.entries()) {
+  const titlesToTry = profile.jobPreferences.titles.slice(0, maxSearches);
+
+  for (const [index, title] of titlesToTry.entries()) {
     if (selected.length >= targetCount) break;
 
     if (index > 0) await pace();

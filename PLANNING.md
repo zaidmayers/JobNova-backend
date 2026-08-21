@@ -286,13 +286,51 @@ unrelated fields with no engineering/ML overlap.
         Throws (doesn't hang forever) if 15 minutes passes unresolved.
       - Added pacing between searches (~4-7s randomized) — not stealth, just not
         repeating the exact behavior that triggered this in the first place.
-      **Not yet re-tested against a live challenge** — the fix compiles and the
-      logic is sound, but hasn't actually been exercised against a real,
-      in-progress Cloudflare challenge yet (the run that hit it happened before
-      this fix existed). Deliberately did NOT immediately re-run the script right
-      after getting blocked twice in a row — didn't want to hammer the same wall
-      a third time; waiting for the block to cool off first before retrying, and
-      the actual pause/resume behavior will get verified once it does.
+      **Re-tested after the block cooled off**: confirmed manually the block had
+      cleared (browser showed a completely normal Indeed page again), then re-ran.
+
+      **The pause/resume mechanism itself worked exactly as designed**: search #1
+      succeeded (32 cards), search #2 hit a Cloudflare challenge, and
+      `waitIfChallenged` correctly detected it, printed the pause message, and
+      stopped the automation cold — no retry, no forcing through. That part of the
+      brief's requirement is proven, live, working correctly.
+
+      **But the challenge itself could not be resolved, even by a real human**:
+      Zaid clicked "Verify you are human" — the checkbox visibly loaded, then
+      disappeared without ever showing success, and the page reverted to (then
+      escalated past) the challenge, ending back at the no-checkbox "Return home"
+      state. Confirmed by asking specifically what he observed rather than assuming
+      "solve it" would work — the checkbox itself was failing its own validation.
+
+      **This means Cloudflare is rejecting the automated browser session itself**,
+      not gating on a one-time human action. Considered and explicitly rejected:
+      changing the browser's fingerprint (e.g., Playwright's `channel: 'chrome'`
+      to use the real installed Chrome instead of the bundled test binary, or
+      stripping other automation-detectable signals) to get past this. That
+      crosses from "let a human clear a normal verification step" into "make the
+      automation itself look less like automation to defeat bot detection" — which
+      is exactly the kind of security-mechanism bypass the brief says not to
+      attempt, even though the underlying intent (apply to real jobs with a real
+      profile) is completely legitimate. Chose not to do it.
+
+      **Decision: stop here for this run, mark it a genuine
+      `manual_action_required` outcome, and change strategy going forward rather
+      than keep re-attempting multi-search runs that trip this.** Two adjustments,
+      neither of which is evasion — both are just "make fewer automated requests
+      in a row," a legitimate lever:
+      1. Don't chain all 7 target titles per run — a single search already returns
+         30+ real candidates, likely enough to reach the target count of 5 on its
+         own without needing back-to-back searches at all.
+      2. Space out live runs against Indeed generally rather than iterating rapidly
+         during development — the remaining pipeline (apply-flow automation) will
+         be built and tested next using the real card data already captured from
+         the one clean successful search, rather than requiring a fresh live
+         Cloudflare-cleared run for every development iteration.
+      **Honest, real limitation for the README**: Indeed's bot protection can
+      escalate to a state that doesn't clear even with genuine human interaction,
+      at least not quickly. The system's correct behavior in that case — proven
+      live here — is to stop completely and surface it as `manual_action_required`,
+      not to try harder to get through.
 - [ ] Apply-flow automation
 - [ ] Verification-challenge pause/resume handling
 - [ ] Application status tracking (SQLite)
