@@ -227,7 +227,72 @@ unrelated fields with no engineering/ML overlap.
       testing whether a lighter touch (e.g. Playwright's `channel: 'chrome'` using
       the real installed Chrome instead of the bundled test binary) can pass
       headless. Not blocking — just a real tradeoff to note, not resolved yet.
-- [ ] Job search/select logic
+- [~] **Job search/select logic — built, real problems hit and fixed, one
+      still pending resolution.**
+      `src/types/job.ts` (backend's own `JobListing` — distinct from the frontend's
+      mock `JobDetail`, this is real scraped data), `src/lib/salary.ts`
+      (`meetsMinSalary` — compares a listing's salary text against the profile's
+      floor using the TOP of the listed range, not the bottom: a job whose range
+      tops out at/above the floor is still worth a look even if its low end isn't;
+      a listing with no salary shown is never excluded, since there's nothing to
+      judge), `src/lib/jobSearch.ts` (`searchJobs` — loops the profile's target
+      titles, reads Indeed's search results, filters to Easily-apply +
+      salary-meets-floor, stops once it has a small `targetCount`, currently 5),
+      `src/lib/browser.ts` (`launchAuthenticatedContext` — the shared helper every
+      future script uses to open a browser already logged in via the saved
+      session), `src/search.ts` (the runnable script).
+
+      **Bug found + fixed (serious — was not just "slow", a real 20+ minute stall
+      waiting to happen)**: the original per-card extraction did 3 separate
+      "best-effort" Playwright locator lookups (company/location/salary), each
+      wrapped in `.catch()` — but Playwright's DEFAULT action timeout is 30
+      seconds, and a `.catch()` doesn't skip that wait, it just handles the error
+      *after* the full 30s elapses. With unverified guessed selectors × 3 lookups
+      × ~15-20 cards per page, a single search page could silently eat 20+ minutes
+      of pure timeout-waiting looking like a hang. Fixed two ways: salary is now
+      pulled via regex from text already fetched in one call (zero extra
+      round-trips), and the remaining company/location lookups got an explicit
+      1500ms cap. Also added live progress logging (`Searching "X"...` /
+      `N card(s) read`) — the silence during the stall was itself part of the
+      problem; now it's never ambiguous whether it's working or stuck.
+
+      **Confirmed the extraction logic is reading the right thing**: Zaid asked a
+      sharp question — does "Easily apply" detection actually match the button
+      that says "Apply with Indeed"? Confirmed by inspecting a real screenshot:
+      the small result-list card carries the literal text "Easily apply" as a
+      badge (which is what the code reads), while the separate detail panel shows
+      "Apply with Indeed" as the button label — same distinction, two different
+      elements. Code reads the card, which is correct, but this was verified
+      against a real screenshot rather than assumed.
+
+      **Real obstacle hit — Cloudflare, a second time, different trigger**: first
+      full run: search #1 ("Machine Learning Engineer") succeeded (31 cards read),
+      but every search after it (#2 through #7) returned 0 cards. Screenshot
+      confirmed why: an "Additional Verification Required" Cloudflare challenge —
+      firing 7 automated page navigations back-to-back with zero pause is itself
+      a bot-like pattern, and it tripped protection partway through. By the time
+      the run's own final screenshot was captured, the block had escalated further
+      (no longer even showing a solvable checkbox — just "Return home"),
+      consistent with repeated hammering making it worse, not better.
+
+      **This is the real, live version of the exact behavior the brief requires**
+      — not a side problem to route around. Built properly:
+      - `src/lib/challenge.ts` — `waitIfChallenged(page)`, called after every page
+        navigation. Detects known challenge-page signals, and if present,
+        **stops the automation completely** (no retry, no bypass attempt) and
+        polls (every 5s, up to 15 min) until the page no longer shows a challenge
+        — i.e., waits for a human to actually resolve it in the visible browser
+        window, however they do that (solve it, wait it out, whatever it takes).
+        Throws (doesn't hang forever) if 15 minutes passes unresolved.
+      - Added pacing between searches (~4-7s randomized) — not stealth, just not
+        repeating the exact behavior that triggered this in the first place.
+      **Not yet re-tested against a live challenge** — the fix compiles and the
+      logic is sound, but hasn't actually been exercised against a real,
+      in-progress Cloudflare challenge yet (the run that hit it happened before
+      this fix existed). Deliberately did NOT immediately re-run the script right
+      after getting blocked twice in a row — didn't want to hammer the same wall
+      a third time; waiting for the block to cool off first before retrying, and
+      the actual pause/resume behavior will get verified once it does.
 - [ ] Apply-flow automation
 - [ ] Verification-challenge pause/resume handling
 - [ ] Application status tracking (SQLite)

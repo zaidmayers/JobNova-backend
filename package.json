@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
-    "login": "tsx src/login.ts"
+    "login": "tsx src/login.ts",
+    "search": "tsx src/search.ts"
   },
   "repository": {
     "type": "git",
