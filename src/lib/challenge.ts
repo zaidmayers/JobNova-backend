@@ -9,14 +9,38 @@ const CHALLENGE_SIGNALS = [
   "Just a moment",
   "Verify you are human",
   "Request Blocked",
+  "Checking your browser",
+  "checking if the site connection is secure",
+  "Enable JavaScript and cookies to continue",
+  "unusual traffic",
+  "I'm not a robot",
 ];
 
 const POLL_INTERVAL = 5000;
 const MAX_WAIT = 15 * 60 * 1000; // 15 min — generous, this may need real wait-out time
 
+// Found live (see PLANNING.md): a fixed text-phrase list is fragile — this
+// exact scenario is why a real Cloudflare escalation on the Systemart run
+// produced a misleading "Could not find 'Apply with Indeed'" result instead
+// of the correct "waiting on a challenge" pause, if the page's actual
+// wording didn't match anything in CHALLENGE_SIGNALS. Backed up with a
+// structural check: Cloudflare's own challenge widget (Turnstile) renders
+// as a recognizable iframe/element regardless of the surrounding page's
+// copy, so this catches wording variants the text list doesn't.
+async function hasChallengeWidget(page: Page): Promise<boolean> {
+  return page
+    .locator(
+      'iframe[src*="challenges.cloudflare.com"], iframe[title*="challenge" i], iframe[title*="human" i], #cf-wrapper, .cf-turnstile, [id*="turnstile" i]'
+    )
+    .first()
+    .isVisible()
+    .catch(() => false);
+}
+
 async function isChallenged(page: Page): Promise<boolean> {
   const text = await page.locator("body").innerText().catch(() => "");
-  return CHALLENGE_SIGNALS.some((signal) => text.includes(signal));
+  if (CHALLENGE_SIGNALS.some((signal) => text.includes(signal))) return true;
+  return hasChallengeWidget(page);
 }
 
 // Call this after every page navigation. Resolves immediately if there's no

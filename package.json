@@ -7,7 +7,10 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "login": "tsx src/login.ts",
-    "search": "tsx src/search.ts"
+    "search": "tsx src/search.ts",
+    "apply": "tsx src/apply.ts",
+    "status": "tsx src/status.ts",
+    "mark-submitted": "tsx src/markSubmitted.ts"
   },
   "repository": {
     "type": "git",

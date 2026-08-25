@@ -448,15 +448,410 @@ unrelated fields with no engineering/ML overlap.
       one that actually matters most; a model that always sounds confident
       would be more dangerous here than one that sometimes says "I haven't."
 
-      **Not done yet**: wiring the structured-field-fill + LLM-draft-fill
-      logic into the actual browser automation (`explore-apply.ts` only reads
-      button labels, doesn't fill anything), and the pause-before-submit
-      checkpoint itself.
+      **Update — wired up and working.** `src/lib/applyForm.ts` now fills
+      radio groups, textareas, plain text/number inputs, and (a narrow,
+      high-confidence pattern of) `<select>` dropdowns; `src/apply.ts`
+      orchestrates: fill current page → scan visible button labels → hard
+      stop and screenshot on anything labeled "submit" → otherwise click
+      Indeed's own "Try again" (transient system errors) or
+      Continue/Review details/Next/Save and continue → stop and screenshot
+      if nothing recognized. `MAX_STEPS = 15` as a hang guard.
+
+      Getting there surfaced two more real bugs, found by reading a
+      screenshot rather than guessing:
+      1. **Field types the first pass didn't handle at all.** The real
+         `questions/2` screen used plain `<input type="text">` (years-of-
+         experience questions) and a `<select>` (education level) —
+         `fillQuestionsPage` only knew radio + textarea, so those required
+         fields stayed empty, Indeed's own validation correctly rejected the
+         page every time, and the script just bounced on the same URL for
+         13 steps looking like a hang. Fixed by adding explicit handling for
+         both: short inputs get LLM-drafted answers (numeric-only instruction
+         + regex-extract fallback for the ones asking "how many years..."),
+         selects only get touched for the one pattern confirmed safe
+         (correcting Indeed's own pre-guessed education level against the
+         real profile — left everything else exactly as Indeed set it rather
+         than risk a wrong guess on an unfamiliar dropdown).
+      2. **The LLM guessed a numeric years-of-experience answer instead of
+         using a real fact.** With only unstructured resume text as context,
+         it answered "2" for "how many years of AI tools experience" — the
+         real answer is 4. Flagged directly by Zaid: *"the LLM needs to be
+         told a little bit about this... I don't have laboratory experience
+         or manufacturing experience so it can write zero there... it
+         needs [not] to guess, we need to feed that somewhere."* Fixed by
+         adding `yearsOfExperience: {keywords, years}[]` to
+         `CandidateProfile` — explicit, self-assessed ground truth (AI/ML
+         tools = 4 years, confirmed directly with Zaid between "3" and "4";
+         manufacturing/laboratory/clinical/etc. = 0), checked
+         **deterministically, before any LLM call**. Only falls back to the
+         LLM when no fact matches, and that fallback prompt now explicitly
+         says to answer "0" rather than estimate when the profile doesn't
+         clearly support a number — same "honest zero over a plausible
+         guess" principle as the Zapier/Make refusal case above. The same
+         facts were also added to `draftScreeningAnswer`'s grounding context
+         so open-ended textarea questions referencing years get the same
+         treatment, not just the dedicated numeric inputs.
+
+      **Correction caught before ever being used live.** The first pass at
+      `yearsOfExperience` only had two buckets (AI/ML tools, and a generic
+      "unrelated fields" zero-bucket that included `"laborator"` as a
+      keyword) — wrong, because Zaid's actual resume experience *is*
+      research/lab work (the Drexel co-op), not a zero. Caught when he gave
+      the fuller breakdown directly: **no traditional industry/company
+      employment at all (0)**; **~1-1.5 years of real research/lab/co-op
+      work** — the actual "Experience" section on the resume; **~2 years of
+      hands-on AI/ML tooling** from academic + independent projects (revised
+      down from an initial "4," which conflated broad tool exposure with the
+      more precise academic estimate — reconciled directly with him rather
+      than guessed); freelance/startup client work under a year, folded into
+      the industry-experience-zero bucket since "under a year" is an honest
+      zero for a whole-year field. Rebuilt as five explicit, narrowly-scoped
+      keyword buckets in `profile.json` rather than one blended number,
+      specifically so a bare "years of experience" question and a "years of
+      AI tools experience" question can't collide on the same value when
+      they mean different things. This is the same class of bug the whole
+      feature exists to prevent — worth keeping in the story for the video:
+      the first structured-facts version was itself wrong until reviewed.
+
+      **Turned out to be our own bug, not a real mismatch.** Ran the fixed
+      flow end-to-end against the real Trece Inc application. After the
+      years-of-experience and education fields were filled correctly, the
+      flow landed on an `intervention` screen — not a bot challenge, an
+      actual Indeed screening gate: *"It looks like you don't meet these
+      employer requirements... Work authorization: Yes (Required)."*
+      Initially read as a genuine mismatch (employer wants no-sponsorship
+      candidates, profile said "No"), and brought to Zaid as a real decision:
+      apply anyway, or switch to a different candidate job. His answer
+      surfaced the actual root cause: **he's on F-1 OPT with a valid EAD
+      (through 2027-02-07, STEM-extension eligible) — which legally
+      authorizes him to work right now, no employer sponsorship required for
+      that authorization.** He *will* need visa sponsorship (H-1B) to keep
+      working once the EAD expires, but that's a separate question from
+      "are you currently authorized to work."
+
+      `profile.jobPreferences.workAuthorization.authorizedWithoutSponsorship`
+      was set to `false` — wrong, and the name itself was part of the bug:
+      it read like "authorized AND will never need sponsorship," which
+      isn't the question Indeed's "are you legally authorized to work in
+      the US?" field is actually asking. Renamed to `authorizedToWork` and
+      corrected to `true`; `requiresSponsorship` stays `true` (separate,
+      also true). Added `visaStatus` and `eadExpiration` as explicit
+      free-text facts so open-ended "describe your work authorization"
+      questions are grounded too — previously `workAuthorization` wasn't
+      even included in the context passed to the LLM at all, a real gap.
+      Also added sponsorship as its own radio-group pattern in
+      `applyForm.ts` (previously only handled as free text), in case a
+      form presents it as Yes/No buttons rather than a textarea.
+
+      **Re-ran against the live Trece Inc application — same intervention
+      screen came back**, but the run log revealed why: every single
+      field said *"already answered/has a value, leaving as-is."* Indeed's
+      smartapply flow persists a candidate's answers server-side across
+      runs (it's the same in-progress application, not a fresh one each
+      time), so the OLD wrong "No" on work authorization was still sitting
+      there from the earlier run — the fill logic's own
+      leave-it-alone-if-already-answered behavior (meant to avoid
+      clobbering a manually-reviewed answer) was exactly what stopped the
+      fixed profile from ever reaching the page.
+
+      **Fix**: split "always enforce" from "leave alone once present."
+      Deterministic, fact-based answers (work authorization, sponsorship,
+      relocation, and now-known years-of-experience) are always written,
+      even overwriting an existing value — there's zero ambiguity about
+      what the correct answer is, so a stale one should never survive.
+      Everything else (LLM-drafted textarea answers, unhandled radio
+      patterns) keeps the original skip-if-already-answered behavior,
+      since those genuinely might reflect a prior manual edit worth
+      preserving. Re-running now should actually overwrite the bad
+      work-authorization answer instead of silently leaving it.
+
+      **Re-ran again — the facts-enforced fix worked** (work authorization
+      correctly set to "Yes," sponsorship textarea correct, years-of-
+      experience fields filled), **but hit a new, real bug**: it then
+      looped 8 times on the same `questions/2` URL, re-filling the same two
+      fields with the same values every step, never advancing, until the
+      browser was closed. Zaid caught it live and sent a screenshot of the
+      actual page: `"1.5"` (the manufacturing/lab years value) was typed
+      into a field that only accepts whole numbers — visible red text read
+      **"Answer must be a valid number (no decimals)."** Client-side
+      validation was silently blocking every "Continue" click; the
+      automation had no way to know why it wasn't moving.
+
+      Zaid's framing directly shaped the fix: *"there could be edge cases
+      like this all the time... the LLM or the API needs to be able to
+      correct it in real time based on what error is being raised... give
+      it some kind of access such that it's able to see the application in
+      real time."* Built exactly that — `fillWithValidationRetry` in
+      `applyForm.ts` fills a field, blurs it, then reads whatever error
+      message the page itself renders nearby (`readFieldError` — checks
+      `role="alert"`/`aria-live`/error-class elements near the field, same
+      way a human would notice red text) and reacts: a small deterministic
+      corrector (`correctNumberFormat`) handles the exact "no
+      decimals/whole number" pattern by truncating — never rounding up,
+      so `1.5` becomes `"1"`, never `"2"`, keeping the "never overclaim"
+      rule intact — with an LLM fallback (`correctForValidationError` in
+      `screeningAnswers.ts`) for anything else, under a strict prompt that
+      it may only reformat the existing true answer, never change what's
+      being claimed or invent new information. Retries once, then gives up
+      cleanly and logs it as needing manual review rather than looping.
+      Also added a loop-level safety net in `apply.ts` — if the URL doesn't
+      move for 2 consecutive steps despite filling + clicking, it stops and
+      screenshots (`sessions/apply-stuck.png`) instead of grinding to
+      `MAX_STEPS`, as defense-in-depth for whatever the field-level fix
+      doesn't catch.
+
+      **Re-ran again — surfaced two more real, live-only bugs in the fix
+      itself.**
+      1. **False positive.** The error-scan matched a `"82 / 1500"`
+         character-counter element on the sponsorship textarea (Indeed
+         apparently styles/marks live-region counters similarly enough to
+         real alerts that the original `[class*="error" i]`/`[aria-live]`
+         scan couldn't tell them apart), treated it as a validation error,
+         and "corrected" a complete, honest sponsorship answer down to
+         just `"Yes"` — losing real content, not just reformatting.
+         **Fixed** by requiring the platform's own explicit invalid signal
+         before trusting anything: either the alert element itself has
+         `role="alert"` (trustworthy on its own), or the field is
+         literally marked `aria-invalid="true"` by the page (in which case
+         a same-styled nearby message counts). A live counter is neither.
+      2. **Timing.** Even correctly, the years-of-experience fields kept
+         showing the *old* `"1.5"` untouched, with no correction attempted
+         at all. Turned out this site's own validation only renders the
+         error message after an actual failed submit attempt — not on
+         blur, which is when the original fix checked. Rather than guess
+         at per-site validation timing, restructured around it: `apply.ts`
+         now attempts the "Continue" click, and if the URL doesn't move,
+         calls a new page-wide `correctVisibleFieldErrors` (scans for
+         whatever the platform has *now* marked `aria-invalid="true"`,
+         corrects each one with the same deterministic-then-LLM logic, all
+         gated by the same real-invalid-signal fix above) and retries the
+         click once before falling through to the existing stuck-detection
+         safety net. This is the more general design anyway — checking
+         after a real submit attempt works regardless of whether a given
+         site validates on blur or on submit.
+
+      **Re-ran again — the timing fix worked (field correctly detected as
+      invalid via `aria-invalid="true"`), but the message-text lookup
+      still came back empty**: `"flagged invalid but no readable error
+      message."` Zaid asked directly why the correction logic couldn't
+      just read the error and fix it — worth being precise about what was
+      actually happening, since it wasn't an LLM reasoning failure: the
+      correction logic (the truncate-decimal rule, and the LLM fallback)
+      never even ran, because the code couldn't locate the error *text* on
+      the page at all — `readFieldError`'s selector list
+      (`role="alert"`/`aria-live`/`class*="error"`) just didn't match
+      whatever markup Indeed actually uses for this specific message, even
+      though the `aria-invalid="true"` flag confirmed something was wrong.
+      Two layers added: (1) `readFieldError` now also checks
+      `aria-describedby` first (the standard way an input is linked to its
+      own error text) and, once `aria-invalid="true"` is confirmed, falls
+      back to grabbing any short non-label text sibling near the field —
+      broadening the text search is safe here specifically because
+      `aria-invalid` is what was already guarding against false positives,
+      not the text-matching. (2) A last-resort fallback in
+      `correctVisibleFieldErrors`: if a field is confirmed invalid but no
+      message text can be found at all, and its value is a plain decimal
+      (`\d+\.\d+`), apply the known-safe truncation fix anyway — this
+      exact failure mode has now been observed live twice, so it's a
+      reasonable fallback rather than a guess.
+
+      **Re-ran once more (7th live run in this session) — got through
+      `questions/2` cleanly this time** (the decimal fallback fired again,
+      correctly), **and confirmed the work-authorization fix actually
+      resolved the earlier "intervention" screen — it never reappeared.**
+      Hit a different wall next: `structured-data-review` (Indeed's own
+      resume-parsing review step) threw the same generic *"Something went
+      wrong... our systems are still having some trouble"* error seen
+      before with KSB — a real Indeed-side backend hiccup, not our bug,
+      confirmed by the identical wording and by "Try again" disappearing
+      on retry. Same principle as before: didn't fight it. Asked Zaid how
+      to proceed; he chose to switch to a different candidate job rather
+      than wait on Trece Inc, same call made with KSB.
+
+      **Picked the next target deliberately, not just the next result.**
+      Ran a fresh, single (paced) search — 5 results, no Cloudflare issue.
+      Evaluated each against the real profile rather than taking the top
+      hit: two were "Senior"-titled roles (SciTec, Targan) that don't
+      honestly match ~1.5 years of real experience; one was the same
+      manufacturing-titled listing from the original search (Work4ce) —
+      an explicit zero-experience category per Zaid directly; one
+      (Reading Bakery Systems' "Automation R&D Engineer") was ambiguous
+      enough (AI-branded title, industrial-equipment company) not to be
+      confident about. Recommended and picked **MLOps Platform Engineer
+      (SageMaker) @ Systemart, LLC** — not senior-titled, and genuinely
+      aligned with real resume experience (AWS, Flask/Elastic Beanstalk,
+      Postgres/pgvector deployment work).
+
+      **Systemart run returned "Could not find 'Apply with Indeed'"** —
+      immediately followed by Zaid watching **Cloudflare's escalating
+      challenge trigger live** in the browser: the checkbox behaved
+      exactly like the earlier documented case (loads, disappears, never
+      validates, even on genuine human clicks) — not something to push
+      through, so he closed the browser rather than fight it. This also
+      means the "Could not find Apply with Indeed" result is now suspect
+      as a false negative: `waitIfChallenged` only recognizes a fixed list
+      of known Cloudflare page-text patterns, and if this particular
+      challenge rendered with different wording, the script would have
+      sailed past it uncaught, then correctly-but-misleadingly reported no
+      Easy Apply button on what was actually a challenge page, not the
+      real job listing. Worth checking directly (not just re-running blind)
+      once resumed.
+
+      **Likely root cause of the escalation**: 7 live automated browser
+      launches against the same account in one session, in a fairly tight
+      window — probably read by Cloudflare as unusual repeated automated
+      access, independent of anything wrong in a single run. Real,
+      demo-relevant material for the README's failure-handling section:
+      the correct response to this class of block is backing off and
+      pacing requests, not retrying harder or spoofing anything. Paused
+      here rather than immediately restarting.
+
+      **Hardened `waitIfChallenged` before resuming**, per the concern
+      above. Added more text-phrase variants, and — the more important
+      change — a structural check that no longer depends on wording at
+      all: looks for Cloudflare's own Turnstile widget (challenge iframe /
+      `.cf-turnstile` / `#cf-wrapper`) directly, since that renders the
+      same way regardless of whatever copy surrounds it. A fixed phrase
+      list alone is exactly the kind of thing that quietly goes stale.
+
+      **Retried once more after the hardening — still triggered, from the
+      very first navigation this time, worse than before.** Confirmed with
+      Zaid live: even genuine human clicks on the checkbox looped forever
+      without validating. Explained honestly why, rather than treat it as
+      unexplainable: Cloudflare's challenge is a continuous risk score
+      (browser fingerprint/automation markers, IP pattern, request
+      cadence), not a one-time boolean gate — a real click is only one
+      input into that score, and a Playwright-controlled browser carries
+      automation signals independent of who's clicking. 9 live automated
+      launches in one session in a tight window is exactly the pattern
+      Cloudflare's escalation is designed to catch, and by design resists
+      quick retries — waiting is not a stall tactic, it's the actual
+      mechanism. Zaid asked directly whether we could "reset" it — was
+      explicit that the techniques that would (clearing Cloudflare cookies,
+      IP rotation, fingerprint spoofing) are themselves the exact
+      bypass/evasion behavior the brief prohibits, so those were ruled out
+      on principle, not just risk.
+
+      **Diagnostic, not a workaround**: rather than guess whether this was
+      account-wide or automation-specific, asked Zaid to open Indeed in his
+      own regular everyday Chrome (no automation involved at all) —
+      **loaded completely normally, no challenge.** Confirms the block is
+      narrowly scoped to the repeatedly-relaunched automated browser
+      context, not the account or the network. Real, useful signal: a
+      fresh session tomorrow after real elapsed time should start clean.
+      Decision: stop automated runs for the rest of the day (deadline is
+      in ~2 days, but bypassing the thing the brief explicitly prohibits
+      isn't a real option under time pressure either) — resume with a
+      single, uninterrupted clean run rather than many small ones, and use
+      the remaining time on parts that don't touch the live browser at all
+      (status tracking, README).
+
+      **Resumed under real deadline pressure** (submission due the next
+      day). Session had actually logged out entirely by this point —
+      Indeed redirected to its own `/auth` login page mid-run. Not
+      something to script through (typing credentials would be new
+      automated-login territory, the same category of thing that got
+      blocked by Google earlier); fixed the same proven way — Zaid was
+      still logged in on his own regular browser, re-exported cookies via
+      Cookie-Editor, re-imported, `verify-session.ts` confirmed it worked.
+
+      **Traced the "Something went wrong" error to its real cause.** Zaid
+      found a real Reddit thread (r/IndeedJobs, "Indeed is giving me 'our
+      systems are having trouble'...") describing this exact error,
+      independently, across many different users. Key finding, from user
+      u/Nightman463: the structured resume data (Education/Experience)
+      gets saved in a state Indeed's backend chokes on, and re-entering it
+      through the UI — delete, then manually retype the same values —
+      fixed it for multiple people who confirmed it worked. Built
+      `resaveStructuredDataOnError` in `applyForm.ts` to do exactly that
+      automatically: detect the error, dismiss it, find each entry's
+      "Edit {label}" control, clear and retype every field, save. This is
+      a legitimate UI-level workaround — the exact interface a human uses,
+      changing nothing about what's actually being claimed — not evasion
+      of anything security-related.
+
+      Took three real iterations to get the selector right, each one
+      informative rather than wasted:
+      1. First attempt guessed at `aria-label*="edit"` with a `:near()`
+         proximity selector — didn't match; the still-open error dialog
+         was blocking the entry section.
+      2. Rebuilt to dump every visible button's real `text`/`aria-label`
+         when the edit control isn't found, instead of failing silently.
+         That revealed the real, exact pattern: Indeed labels these
+         buttons `"Edit {entry text}"` / `"Remove {entry text}"` — but an
+         exact-string match still failed, because Indeed's own displayed
+         label **drops the profile's parenthetical GPA suffix**
+         (`"M.S. ... (3.8 GPA)"` → `"Edit M.S. ... Engineering"`, no GPA).
+      3. Fixed with a `shortLabel()` helper — anchors on a short leading
+         word-prefix (splits on `(` or `—`, takes the first ~4 words) and
+         matches by substring instead of guessing Indeed's exact
+         truncation rule, since it turned out to differ per field
+         (parenthetical dropped on Education, truncated before an em-dash
+         on Experience). Confirmed live: found and clicked the real edit
+         controls, re-entered 4 fields on Education, 3 on Experience,
+         saved successfully.
+
+      **The workaround worked exactly as designed — and the error still
+      came back anyway.** Re-ran fully: both entries found, re-entered,
+      and saved for real; the retry still landed on the identical error.
+      This matches a specific, sobering detail buried in the same Reddit
+      thread — u/doin_better: *"Same its been a month for me... Even
+      after clearing cookies and cache. Same BS on Chrome, Edge, and
+      Safari."* For a real subset of users, this bug has no client-side
+      fix at all — confirmed true for this account too, by actually trying
+      the community's best-known fix correctly rather than assuming. This
+      is a genuine, externally-documented, unresolved Indeed platform
+      issue, not something in this codebase — and not something to keep
+      grinding against under a hard deadline. Stopped live attempts here.
+
+      **Still not done**: the pause-before-submit checkpoint exists (hard
+      stop + screenshot on any submit-labeled button, never auto-clicked),
+      but there's no structured UX beyond that screenshot + console log for
+      reviewing exactly what was filled before a human approves — worth
+      revisiting once we pick the job for the real final submission.
 - [x] Verification-challenge pause/resume handling — the detect-and-pause mechanism
       (`waitIfChallenged`) is built and **proven live** against a real Cloudflare
-      challenge (see above). What's not done yet: wiring a detected challenge into
-      an actual `manual_action_required` database row — that's blocked on the
-      "Application status tracking" milestone below, which hasn't been built. The
-      mechanism itself works; persisting that status doesn't exist yet.
-- [ ] Application status tracking (SQLite)
-- [ ] README (architecture, session handling, failure handling, multi-user extension)
+      challenge (see above). Now wired into the status database too — see below.
+- [x] **Application status tracking (SQLite).** Built while the Cloudflare
+      cooldown ran, deliberately as work that doesn't touch the live
+      browser at all. `src/lib/applicationDb.ts` — one `applications` table,
+      one row per `job_url`, `status` constrained to the brief's exact five
+      values (`pending`, `in_progress`, `submitted`, `failed`,
+      `manual_action_required`). Wired into every real stopping point:
+      - `search.ts` records every candidate found as `pending`
+        (`recordCandidateIfNew` — insert-only, deliberately never
+        overwrites an existing row, so re-running a search doesn't demote
+        a job that's already been attempted back down to `pending`).
+      - `apply.ts` sets `in_progress` the moment a real run starts, then
+        one of: `manual_action_required` (reached the submit checkpoint
+        awaiting human review; stuck on the same page after repeated
+        fill+click attempts; hit the step cap; no recognized button) or
+        `failed` (no "Apply with Indeed" button found at all; an unhandled
+        exception). Every write includes a real, specific note — not just
+        the bare status — since "manual_action_required, no explanation"
+        isn't actually reviewable later.
+      - `submitted` is deliberately NOT something the automation ever sets
+        itself — consistent with apply.ts never auto-clicking the real
+        submit button, `src/markSubmitted.ts` is a separate, explicit
+        command a human runs after actually reviewing and submitting for
+        real in the browser. The status database mirrors the same
+        human-in-the-loop boundary as the browser automation itself.
+      - `src/status.ts` (`npm run status`) lists every tracked application
+        — read-only, no browser involved, safe to run anytime including
+        mid-cooldown.
+      Verified offline before ever touching a live run (same discipline as
+      the DOM-selector bugs earlier): a throwaway smoke-test script
+      confirmed `recordCandidateIfNew` doesn't clobber an existing row,
+      status transitions and notes update correctly, and retrieval works —
+      deleted after use, along with the test database, so the first real
+      run starts on a clean `data/applications.db`.
+- [x] **README** (`README.md`) — architecture diagram, setup, usage, session
+      management (why headed-only, the two capture paths, why sessions
+      sometimes need re-export), job search/selection philosophy, LLM
+      grounding, a full failure-handling table covering every real class of
+      failure hit live this session, application status tracking, a
+      concrete multi-user extension plan, and an honest "known limitations"
+      section — including that no application has reached a final
+      human-confirmed submit yet, and why (Cloudflare's escalation, and a
+      confirmed externally-documented Indeed platform bug — neither within
+      this codebase's control).

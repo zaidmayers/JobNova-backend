@@ -14,7 +14,8 @@ STRICT RULES:
 - If the profile doesn't contain enough to truthfully answer, say so honestly and briefly (e.g., "I haven't worked directly with X, but I have related experience with Y") — never fabricate to sound more qualified.
 - Write in first person, as the candidate.
 - Keep answers concise (2-4 sentences) unless the question clearly asks for more detail.
-- No generic filler — every claim must trace back to something in the profile.`;
+- No generic filler — every claim must trace back to something in the profile.
+- If the question asks for a specific number of years in some area and "yearsOfExperience" below has a matching entry, use that exact number — it's the candidate's own stated fact, not something to re-derive from the dates in "experience". If nothing matches, don't estimate one — say the candidate doesn't have dedicated experience in that specific area (0), unless the "experience" entries clearly show otherwise.`;
 
 export async function draftScreeningAnswer(
   question: string,
@@ -25,6 +26,8 @@ export async function draftScreeningAnswer(
       skills: profile.skills,
       experience: profile.experience,
       education: profile.education,
+      yearsOfExperience: profile.yearsOfExperience,
+      workAuthorization: profile.jobPreferences.workAuthorization,
     },
     null,
     2
@@ -33,4 +36,27 @@ export async function draftScreeningAnswer(
   const userPrompt = `CANDIDATE PROFILE:\n${profileSummary}\n\nSCREENING QUESTION: "${question}"\n\nWrite the candidate's honest answer to this question, following the rules above.`;
 
   return askKimi(SYSTEM_PROMPT, userPrompt);
+}
+
+// Real-time self-correction against the platform's OWN validation error —
+// e.g. Indeed rejecting "1.5" with "Answer must be a valid number (no
+// decimals)." This is a narrower, stricter job than drafting an answer:
+// reformat the exact same true answer to satisfy a formatting rule, never
+// re-derive or embellish it. Used as the fallback when the deterministic
+// corrector (see correctNumberFormat in applyForm.ts) doesn't recognize the
+// error pattern — most cases are handled there without an LLM call at all.
+const VALIDATION_FIX_SYSTEM_PROMPT = `You are fixing the FORMAT of a real job application answer that the website's own form validation just rejected. This is not a new question — it's the same true answer, needing a different format.
+
+STRICT RULES:
+- Change ONLY what the error message says is wrong (e.g. remove decimals, shorten length, use digits instead of words). Never change the underlying fact or meaning.
+- Never invent, add, or infer new information not already in the original answer.
+- Return ONLY the corrected value — no explanation, no quotes, no extra words.`;
+
+export async function correctForValidationError(
+  question: string,
+  attemptedAnswer: string,
+  errorMessage: string
+): Promise<string> {
+  const userPrompt = `QUESTION: "${question}"\nORIGINAL ANSWER (rejected by the form): "${attemptedAnswer}"\nFORM'S VALIDATION ERROR: "${errorMessage}"\n\nRewrite the original answer so it satisfies this exact validation error.`;
+  return askKimi(VALIDATION_FIX_SYSTEM_PROMPT, userPrompt);
 }

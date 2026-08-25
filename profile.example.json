@@ -21,14 +21,26 @@
     }
   ],
   "skills": ["Python", "Example Skill"],
+  "yearsOfExperience": [
+    {
+      "keywords": ["example skill", "example tool"],
+      "years": 2
+    },
+    {
+      "keywords": ["unrelated field example"],
+      "years": 0
+    }
+  ],
   "jobPreferences": {
     "titles": ["Example Engineer", "Senior Example Engineer"],
     "locations": ["Anywhere in the US"],
     "remoteOk": true,
     "minSalary": { "annual": 70000, "hourly": 27 },
     "workAuthorization": {
-      "authorizedWithoutSponsorship": true,
-      "requiresSponsorship": false
+      "authorizedToWork": true,
+      "requiresSponsorship": false,
+      "visaStatus": "U.S. Citizen",
+      "eadExpiration": ""
     },
     "availability": "immediate"
   }

@@ -19,9 +19,11 @@ console.log(
 );
 console.log(
   `Work authorization: ${
-    profile.jobPreferences.workAuthorization.authorizedWithoutSponsorship
-      ? "authorized, no sponsorship needed"
-      : "requires sponsorship"
-  }`
+    profile.jobPreferences.workAuthorization.authorizedToWork ? "authorized to work" : "not authorized"
+  }, ${
+    profile.jobPreferences.workAuthorization.requiresSponsorship
+      ? "will need visa sponsorship eventually"
+      : "no sponsorship ever needed"
+  } (${profile.jobPreferences.workAuthorization.visaStatus})`
 );
 console.log(`Availability: ${profile.jobPreferences.availability}`);
